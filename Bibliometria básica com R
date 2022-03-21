@@ -17,12 +17,12 @@ H <- convert2df("D:\\RAFAEL\\Desktop\\Bibliometria\\MLCBSCOPUS.bib", dbsource = 
 
 mergeddb <- mergeDbSources(A,B,C,D,E,F,G,H, remove.duplicated = TRUE)
 
-#gerar arquivo csv no diretório destino
+#gerar arquivo csv no diretÃ³rio destino
 
 CSV <- mergeddb[,c("AU","DE","C1","CR","AB","DI","SO","LA","PN","PU","TC","TI","VL","PY","RP","DB","SR")]
 write.table(CSV, "D:/RAFAEL/Desktop/Bibliometria/mergeddb.csv",sep = ";", row.names = FALSE)
 
-#Análise
+#AnÃ¡lise
 
 Analisebiblio <- biblioAnalysis(mergeddb)
 Resumo <- summary(Analisebiblio)
