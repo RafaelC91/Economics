@@ -1,0 +1,247 @@
+library(data.table) # leitura de arquivo
+library(dplyr) # processamento de dados
+# library(ggplot2) # visualizacao
+library(tidyverse) # arrumação de dados
+
+library(knitr) # viz de tabelas
+library(kableExtra) # viz de tabelas
+
+library(gtools) 
+library(rpart) # para o cart
+library(rpart.plot) # para plotar a árvore
+library(rattle) # plot analysis for data mining
+library(yardstick) # para a curva roc - há também o pacote pROC
+
+library(caret) # para o ajuste de modelos (reg e class)
+library(randomForest)
+library(fastDummies)
+library(xgboost) # eXtreme Gradient Boosting Training
+
+
+library(report) # para relatorios de eda
+library(DataExplorer) # para relatorios de eda
+library(skimr) # para relatorios de eda
+library(corrr) # network_plot
+
+
+require(rattle)
+rm(list=ls())
+options(scipen=999999)
+
+# ----------------------------------------------------
+
+# CARREGA DADOS
+
+# ----------------------------------------------------
+
+#  sincronizar google drive entre computadores
+setwd(paste0(sub(
+  "trabalho/.*",
+  "",
+  dirname(rstudioapi::getSourceEditorContext()$path)
+), "trabalho"))
+
+
+# load("database/LGFSRR_housing_imputed_2022-05-23.RData")
+# rm(dados_imprf)
+
+#dados espacial
+load("database/LGFSRR_housing_imputed_geocenter_2022-06-11.RData")
+names(dadoscapA_coord)
+dadoscapA$dist_cen<-dadoscapA_coord$DIST_CEN_M #pega distancia ao centro
+dadoscapH$dist_cen<-dadoscapH_coord$DIST_CEN_M #pega distancia ao centro
+
+rm(dadoscapA_coord,dadoscapH_coord)
+
+dados<-rbind(dadoscapA,dadoscapH)
+rm(dadoscapA,dadoscapH)
+
+table(is.na(dados$dist_cen))
+table(is.na(dados$DISTRITO))
+mean(dados$dist_cen,na.rm = TRUE)
+
+dist_cen<-dados |> 
+  group_by(DISTRITO) |> 
+  summarise(dist_cen_mean=mean(dist_cen,na.rm=TRUE)) |> 
+  ungroup() #vetor de distancias medias para cada distrito
+
+distritos_lb<-dados |> 
+  group_by(DISTRITO) |> 
+  slice_head() |> 
+  pull(DISTRITO) #vetor de nomes de distritos
+
+categtipo_lb<-dados |> 
+  mutate(categtipo=paste0(categ,"-",tipo)) |> 
+  group_by(categtipo) |> 
+  slice_head() |> 
+  pull(categtipo) #vetor de categ tipos
+
+dados_imp<-dados |> 
+  as.data.frame() |> 
+  left_join(dist_cen,by=c("DISTRITO")) |> 
+  select(Rprice,
+         bed,bath_imp,garage_imp,area_imp,dist_cen,dist_cen_mean,
+         categ,tipo,DISTRITO) |> 
+  mutate(bath_imp=parse_number(as.character(bath_imp)),
+         garage_imp=parse_number(as.character(garage_imp)),
+         categtipo=paste0(categ,"-",tipo),
+         distrito=factor(DISTRITO,levels=distritos_lb),
+         categtipo=factor(categtipo,levels=categtipo_lb)) |> 
+  select(-c(DISTRITO,categ,tipo,distrito)) |> 
+  na.omit()
+rm(categtipo_lb,distritos_lb,dist_cen)
+
+#### ADICIONA VARS de interação
+dados_imp<-dados_imp |> 
+  mutate(bed_area=bed*area_imp,
+         bath_area=bath_imp*area_imp,
+         garage_area=garage_imp*area_imp)
+
+# EDA 
+plot_intro(dados_imp)
+plot_histogram(dados_imp, ncol = 3, ggtheme = theme_light())   # vars continuas
+
+# correlacao LINEAR
+dados_imp |> 
+  select(-c(categtipo,dist_cen))|> 
+  correlate(method = "pearson", use = "pairwise.complete.obs") |> 
+  network_plot( min_cor = 0 ,curved=F)
+
+# cria bases
+# com RPrice
+dec_Rprice<-quantile(dados_imp$Rprice, prob = seq(0, 1, length = 21), type = 5)
+dec_Rprice[1]<-dec_Rprice[1]-1
+
+dadoscart_Rprice<-dados_imp |>  #adiciona var categoria com categs de rprice
+  ungroup() |> 
+  mutate(Rprice_cut=cut(Rprice/1000,
+                    breaks=dec_Rprice/1000,
+                    ordered_result = T,
+                    dig.lab=3))
+table(dadoscart_Rprice$Rprice_cut) #mantem cut para comparação ao final
+
+
+# ----------------------------------------------------
+# Configurando o treinamento do cart
+set.seed(1) 
+
+partition <- createDataPartition(y = dadoscart_Rprice$Rprice, p = 0.8, list = FALSE)
+train_data <- dadoscart_Rprice[partition, ] |> select(-Rprice_cut)
+test_data <- dadoscart_Rprice[-partition, ] |> select(-Rprice_cut)
+
+# treinamento do modelo
+set.seed(100)
+
+# modelo livre = cp = 0
+dadoscapnum_cart <- rpart(formula = Rprice ~ .,
+                          data    = train_data,
+                          method = "anova",
+                          control = list(cp = 0, xval = 10) )
+?rpart
+
+summary(dadoscapnum_cart)
+print(dadoscapnum_cart)  # resumo geral dos resultados - tabela de cp vs desempenho
+plotcp(dadoscapnum_cart)
+
+min(dadoscapnum_cart$cptable[,4]) # min xerror
+
+rpart.plot(dadoscapnum_cart) # muitas folhas, precisa de poda 
+
+
+# teste
+predicted = predict(dadoscapnum_cart, newdata = test_data)
+RMSE(predicted, obs = test_data$Rprice) # 
+# ----------------------------------------------------
+
+# modelo 2 - poda/pruning
+dadoscapnum_cart2 = rpart(formula = Rprice ~ .,
+                          data    = train_data,
+                          method = "anova", 
+                          control = list(minsplit = 20,
+                                         maxdepth = 6,
+                                         xval = 30,
+                                         cp = 0.015) )
+
+plotcp(dadoscapnum_cart2)
+dadoscapnum_cart2$cptable # min xerror 
+rpart.plot(dadoscapnum_cart2)
+
+predicted2 = predict(dadoscapnum_cart2, newdata = test_data)
+RMSE(predicted2, obs = test_data$Rprice ) #11.17296
+
+
+# ----------------------------------------------------
+# tuning com o caret
+set.seed(1234)
+
+dadoscapnum_cart3 <- caret::train( Rprice ~ .,
+                            data    = train_data[,-8], 
+                            method = "rpart", 
+                            tuneGrid = expand.grid(cp = seq(from = 0.001, to = 0.015, length = 50)),  
+                            metric = "RMSE",
+                            trControl = trainControl(method = "cv", number = 10)
+)
+
+
+
+plot(dadoscapnum_cart3) # cp vs RMSE (Cross validation)
+
+# tabela com erros: CP - RMSE - Rsquared - MAE
+print(dadoscapnum_cart3) # cp
+
+rpart.plot(dadoscapnum_cart3$finalModel )
+
+# olhando para a importancia de cada variavel para o cart obtido
+
+plot(varImp(dadoscapnum_cart3), main="Variable Importance with CART (caret)")
+dadoscapnum_cart3$finalModel$variable.importance
+
+predicted3 = predict(dadoscapnum_cart3, newdata = test_data)
+
+RMSE(predicted3, obs = test_data$Rprice)
+RMSE(predicted2, obs = test_data$Rprice) 
+RMSE(predicted, obs = test_data$Rprice) 
+
+
+# para "ver" as regras do modelo 3
+rules_3 = rpart.rules(dadoscapnum_cart3$finalModel) 
+View(rules_3)
+
+dadoscap_results = data.frame(free_cart = predicted,
+                              cart2 = predicted2,
+                              cart3 = predicted3,
+                              observed = test_data$Rprice)
+
+dadoscap_results_long = pivot_longer(dadoscap_results,
+                                     -observed,
+                                     names_to = "Model",
+                                     values_to = "Predicted")
+
+ggplot(dadoscap_results_long, 
+       aes(x = observed, y = Predicted, color = Model, shape = Model )) +
+       geom_jitter(size = 1.5, width = .25) + 
+       theme_light()
+
+## GRAFICO COM CUT
+dec_Rprice<-quantile(dados_imp$Rprice, prob = seq(0, 1, length = 11), type = 5)
+dec_Rprice[1]<-dec_Rprice[1]-1
+
+dadoscap_results_long2<-dadoscap_results_long |> 
+  mutate(observed_cut=cut(observed/1000,
+                             breaks=dec_Rprice/1000,
+                             ordered_result = T,
+                             dig.lab=3),
+         Predicted_cut=cut(Predicted/1000,
+                             breaks=dec_Rprice/1000,
+                             ordered_result = T,
+                             dig.lab=3))
+
+ggplot(dadoscap_results_long2, aes(x = observed_cut, y = Predicted_cut, color = Model, shape = Model ) ) +
+  geom_jitter(size = 1.5, width = .25) + 
+  theme_light()
+
+
+# olhe a distribuicao dos dados 
+table(dadoscap_results$observed) 
+
+table(train_data$Rprice)
