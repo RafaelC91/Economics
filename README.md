@@ -4,4 +4,4 @@
 
 **Bibliometria básica com R**: pesquisa nas bases Web of Science e Scopus sobre artigos referenciando o uso de big data e machine learning nos Bancos Centrais e na política monetária.
 
-**Análise de Cluster, CART e RF**: resultado de trabalho em conjunto com Luiz Gustavo Sereno para a disciplina ICD (Unicamp - 1S/2022). Algoritmos de aprendizado não supervisionado para análise de agrupamentos de imóveis para a cidade de SP. Cluster hierárquico divisivo, K-Means e Análise fatorial de dados mistos. Algoritmos de aprendizado supervisionaro para previsão de preços de imóveis e variáveis categóricas (casa/apto) segundo características. Árvore de regressão e Random Forest. 
+**Análise de Cluster, CART e RF**: resultado de trabalho em conjunto com Luiz Gustavo Sereno para a disciplina ICD (Unicamp - 1S/2022). Algoritmos de aprendizado não supervisionado para análise de agrupamentos de imóveis para a cidade de SP. Cluster hierárquico divisivo, K-Means e Análise fatorial de dados mistos. Algoritmos de aprendizado supervisionado para previsão de preços de imóveis e variáveis categóricas (casa/apto) segundo características. Árvore de regressão e Random Forest. 
